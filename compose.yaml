@@ -67,7 +67,7 @@ services:
       POSTGRES_PASSWORD: reddit
       POSTGRES_DB: reddit
     volumes:
-      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
       - postgres_data:/var/lib/postgresql/data
     networks:
       - reddit-network
@@ -87,7 +87,7 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: admin
     user: "0"
     volumes:
-      - ./grafana_provisioning:/etc/grafana/provisioning
+      - ./infra/grafana:/etc/grafana/provisioning
       - grafana_data:/var/lib/grafana
     networks:
       - reddit-network
@@ -98,13 +98,13 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    
+
   spark-master:
     image: spark-python3-java17:3.5.4
     user: root
     build:
-      context: ./
-      dockerfile: ./spark/Dockerfile
+      context: ./infra/spark
+      dockerfile: ./Dockerfile
     container_name: spark-master
     hostname: spark-master
     ports:
@@ -156,7 +156,11 @@ services:
       # deploy-mode: Whether to launch the driver program locally ("client") or on one of the worker machines inside the cluster ("cluster"). Only client is supported
       # executor-memory: Memory per executor (e.g. 1000M, 2G) (Default: 1G)
       # executor-core: Spark standalone, YARN and Kubernetes only. Number of cores used by each executor. (Default: 1 in YARN and K8S modes, or all available cores on the worker in standalone mode)
-      - "/opt/spark/sbin/start-connect-server.sh --master spark://spark-master:7077 --deploy-mode client --executor-memory 2G --executor-cores 1 --jars /opt/spark/jars/spark-connect_2.12-3.5.4.jar && tail -f /dev/null"
+      - >
+        /opt/spark/sbin/start-connect-server.sh --master
+        spark://spark-master:7077 --deploy-mode client --executor-memory 2G
+        --executor-cores 1 --jars /opt/spark/jars/spark-connect_2.12-3.5.4.jar
+        && tail -f /dev/null
 
   spark-worker:
     image: spark-python3-java17:3.5.4
@@ -176,13 +180,14 @@ services:
     entrypoint:
       - "bash"
       - "-c"
-      - "/opt/spark/sbin/start-worker.sh spark://spark-master:7077 && tail -f /dev/null"
+      - >
+        /opt/spark/sbin/start-worker.sh spark://spark-master:7077 && tail -f
+        /dev/null"
     networks:
       - reddit-network
     volumes:
       - ./data:/data:rw
       - ./logs:/opt/spark/logs
-
 
 volumes:
   kafka_data:

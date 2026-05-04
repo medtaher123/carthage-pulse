@@ -26,9 +26,11 @@ Thumbs.db
 
 # Logs
 *.log
+logs/
 
 # Data (persisted)
 data/
 
 # env
 .env
+
