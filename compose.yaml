@@ -101,6 +101,7 @@ services:
 
   spark-master:
     image: spark-python3-java17:3.5.4
+    pull_policy: never
     user: root
     build:
       context: ./infra/spark

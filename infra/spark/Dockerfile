@@ -3,7 +3,7 @@ FROM spark:3.5.4-java17-python3
 USER root
 
 # Install Python Dependencies
-COPY ./spark/requirements.txt /opt/
+COPY ./requirements.txt /opt/
 RUN pip install -r /opt/requirements.txt
 
 # Install required jars
