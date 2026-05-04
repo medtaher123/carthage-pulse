@@ -1,60 +1,58 @@
-# Reddit Analytics
+# Carthage Pulse
 
-Real-time Reddit analytics pipeline with sentiment analysis and topic extraction.
+Real-time Reddit analytics pipeline with LLM-powered sentiment analysis, topic extraction, and entity recognition — focused on Tunisian social media content.
 
 ## Architecture
 
-```
-Reddit API
-    ↓
-reddit_stream (fetch from Reddit)
-    ↓
-reddit_enricher (LLM enrichment)
-```
+Carthage Pulse follows a Lambda Architecture with batch and speed layers for real-time and historical analytics. Reddit posts and comments are ingested from the API and published to Kafka. A processing service consumes these events, enriches them with LLM analysis (sentiment, topics, entities, translation), and publishes enriched events back to Kafka. A storage service persists both raw and enriched data to MinIO and PostgreSQL. Spark Streaming jobs consume from Kafka to compute real-time trending topics and words, while Spark Batch jobs handle historical analysis. Results are stored in PostgreSQL and visualized through Grafana dashboards.
 
 ## Services
 
 | Service | Description |
 |---------|-------------|
-| `reddit_stream` | Fetch posts/comments from Reddit API |
-| `reddit_enricher` | LLM enrichment (sentiment, topics, translation) |
-| `compose` | Kafka infrastructure |
+| `ingestion` | Fetches posts/comments from Reddit API and publishes to Kafka |
+| `processing` | Consumes Kafka events, enriches with LLM analysis (sentiment, topics, entities, translation) |
+| `storage` | Persists enriched events to MinIO (object storage) |
+| `speed` | Spark Streaming jobs for real-time analytics (trending topics, trending words) |
+| `batch` | Spark Batch jobs for historical analysis (coming soon) |
+| `presentation` | Grafana dashboards for real-time metrics and trends |
+
+## Presentation
+
+Grafana dashboards (available at http://localhost:3000, login: admin/admin) display real-time metrics:
+
+- **Raw events** — time series chart and gauge showing ingestion rate over time
+- **Enriched events** — time series chart and gauge showing processing throughput
+- **Rolling averages** — 5-minute moving average of event rates
 
 ## Quick Start
 
-### 1. Start Kafka
+### Prerequisites
+
+- Docker & Docker Compose
+- Python 3.10+
+- [uv](https://github.com/astral-sh/uv) package manager
+
+### 1. Start Infrastructure
+
 ```bash
 docker compose up -d
 ```
-Kafka UI is available at: http://localhost:8080
 
-### 2. Run Streamer
+### 2. Configure
+
 ```bash
-cd reddit_stream
-cp config.yaml.example config.yaml
-# Edit config.yaml
-uv sync
-uv run main.py
+cp .env.example .env
+# Edit .env with your API keys
 ```
 
-### 3. Run Enricher
+Review `config/dev.yaml` for pipeline settings (subreddits, LLM provider, batch sizes, etc.).
+
+### 3. Run the Pipeline
+
 ```bash
-cd reddit_enricher
-cp config.yaml.example config.yaml
-# Edit config.yaml with your API key
 uv sync
-uv run main.py
+python main.py
 ```
 
-## Project Structure
-
-```
-.
-├── compose.yaml        # Kafka infrastructure
-├── reddit_stream/       # Python Reddit fetcher
-│   ├── config.yaml.example
-│   └── src/
-└── reddit_enricher/     # Python LLM enrichment
-    ├── config.yaml.example
-    └── src/
-```
+A TUI menu will appear with options to run each service.
