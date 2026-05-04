@@ -71,7 +71,7 @@ def get_postgres_writer(db_url: str, db_name: str, db_table: str, db_user: str, 
         merge_query = f"""
                 INSERT INTO {db_table}
                 SELECT * FROM {staging_table}
-                ON CONFLICT (event_id) DO NOTHING;
+                ON CONFLICT (event_id, timestamp) DO NOTHING;
 
                 DROP TABLE {staging_table};
             """
