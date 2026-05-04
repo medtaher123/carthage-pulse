@@ -100,7 +100,7 @@ services:
       retries: 5
     
   spark-master:
-    image: mounirbs-local/spark-python3-java17:3.5.4
+    image: spark-python3-java17:3.5.4
     user: root
     build:
       context: ./
@@ -130,7 +130,7 @@ services:
       - reddit-network
 
   spark-connect:
-    image: mounirbs-local/spark-python3-java17:3.5.4
+    image: spark-python3-java17:3.5.4
     user: root
     container_name: spark-connect
     hostname: spark-connect
@@ -159,7 +159,7 @@ services:
       - "/opt/spark/sbin/start-connect-server.sh --master spark://spark-master:7077 --deploy-mode client --executor-memory 2G --executor-cores 1 --jars /opt/spark/jars/spark-connect_2.12-3.5.4.jar && tail -f /dev/null"
 
   spark-worker:
-    image: mounirbs-local/spark-python3-java17:3.5.4
+    image: spark-python3-java17:3.5.4
     user: root
     container_name: spark-worker
     depends_on:

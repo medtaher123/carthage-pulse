@@ -14,6 +14,9 @@ SPARK_CONNECT_PORT = int(os.getenv("SPARK_CONNECT_PORT", "15002"))
 SHARED_SESSION_ID = "123e4567-e89b-12d3-a456-426614174000" # this has to be a valid UUID
 SPARK_CONNECT_TARGET = f"sc://{SPARK_CONNECT_HOST}:{SPARK_CONNECT_PORT}/;session_id={SHARED_SESSION_ID}"
 
+RAW_EVENTS_KAFKA_TOPIC = "reddit-events"
+ENRICHED_EVENTS_KAFKA_TOPIC = "reddit-events-enriched"
+
 
 def wait_for_port(host: str, port: int, timeout_seconds: int = 30) -> None:
     """Fail fast with a clear message if Spark Connect is not reachable yet."""

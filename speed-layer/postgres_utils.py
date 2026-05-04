@@ -2,7 +2,7 @@ from pyspark.sql import DataFrame
 import os
 
 
-def get_postgres_writer(db_url: str, db_name: str, db_table: str, db_user: str, db_pass: str):
+def get_postgres_writer(db_url: str, db_name: str, db_table: str, db_user: str, db_pass: str, conflict_columns: list) -> DataFrame:
     """Returns a closure to be used in foreachBatch."""
 
     def write_to_postgres(batch_df: DataFrame, batch_id: int):
@@ -31,10 +31,11 @@ def get_postgres_writer(db_url: str, db_name: str, db_table: str, db_user: str, 
             .save()
         )
         # 2. Execute raw SQL to merge staging table into the target table, ignoring duplicates
+        conflict_columns_str = ", ".join(conflict_columns)
         merge_query = f"""
                 INSERT INTO {db_table}
                 SELECT * FROM {staging_table}
-                ON CONFLICT (event_id, timestamp) DO NOTHING;
+                ON CONFLICT ({conflict_columns_str}) DO NOTHING;
 
                 DROP TABLE {staging_table};
             """
@@ -60,7 +61,7 @@ def get_postgres_writer(db_url: str, db_name: str, db_table: str, db_user: str, 
     return write_to_postgres
 
 
-def write_to_postgres(df, checkpoint_id, db_table, checkpoint_base_dir="/data/checkpoints/spark_checkpoints"):
+def write_to_postgres(df, checkpoint_id, db_table, conflict_columns=("event_id", "timestamp"), checkpoint_base_dir="/data/checkpoints/spark_checkpoints"):
     """Writes a streaming DataFrame to Postgres. Completely independent of the source."""
 
     # Database credentials
@@ -72,7 +73,7 @@ def write_to_postgres(df, checkpoint_id, db_table, checkpoint_base_dir="/data/ch
     # The checkpoint is now based on a unique ID you provide, NOT the Kafka topic
     checkpoint_location = f"{checkpoint_base_dir}__{db_table}__{checkpoint_id}"
 
-    writer_func = get_postgres_writer(db_url, db_name, db_table, db_user, db_pass)
+    writer_func = get_postgres_writer(db_url, db_name, db_table, db_user, db_pass, conflict_columns)
 
     query = (
         df.writeStream
