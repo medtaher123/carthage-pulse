@@ -183,7 +183,7 @@ services:
       - "-c"
       - >
         /opt/spark/sbin/start-worker.sh spark://spark-master:7077 && tail -f
-        /dev/null"
+        /dev/null
     networks:
       - reddit-network
     volumes:
