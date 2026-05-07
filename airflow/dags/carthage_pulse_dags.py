@@ -28,12 +28,12 @@ PYTHON_CMD = '/opt/airflow/.venv/bin/python'
 PROJECT_PATH = '/opt/airflow/project'
 RUN_TASK_SCRIPT = f'{PROJECT_PATH}/airflow/run_task.py'
 
-# DAG 1: Streaming Pipeline (runs every hour, services restart hourly)
+# DAG 1: Streaming Pipeline (indefinite streaming services)
 with DAG(
     'reddit_streaming_pipeline',
     default_args=default_args,
-    description='Orchestrate all long-running services (ingestion, processing, storage, speed)',
-    schedule_interval=timedelta(hours=1),
+    description="Orchestrate all long-running services (ingestion, processing, storage, speed)",
+    schedule_interval='@once',
     start_date=datetime(2024, 1, 1),
     catchup=False,
     tags=['reddit', 'streaming', 'carthage-pulse'],
@@ -44,40 +44,40 @@ with DAG(
     # TaskGroup for core services (ingestion, processing, storage)
     with TaskGroup("services", tooltip="Core long-running services") as services_group:
         run_ingestion = BashOperator(
-            task_id='run_ingestion',
-            bash_command=f'{PYTHON_CMD} {RUN_TASK_SCRIPT} ingestion --max-runtime 3300',
+            task_id="run_ingestion",
+            bash_command=f"{PYTHON_CMD} {RUN_TASK_SCRIPT} ingestion",
         )
 
         run_processing = BashOperator(
-            task_id='run_processing',
-            bash_command=f'{PYTHON_CMD} {RUN_TASK_SCRIPT} processing --max-runtime 3300',
+            task_id="run_processing",
+            bash_command=f"{PYTHON_CMD} {RUN_TASK_SCRIPT} processing",
         )
 
         run_storage = BashOperator(
-            task_id='run_storage',
-            bash_command=f'{PYTHON_CMD} {RUN_TASK_SCRIPT} storage --max-runtime 3300',
+            task_id="run_storage",
+            bash_command=f"{PYTHON_CMD} {RUN_TASK_SCRIPT} storage",
         )
 
     # TaskGroup for speed layer (Spark streaming jobs)
     with TaskGroup("speed", tooltip="Spark Streaming jobs") as speed_group:
         run_speed_raw = BashOperator(
-            task_id='run_speed_save_raw',
-            bash_command=f'{PYTHON_CMD} {RUN_TASK_SCRIPT} speed_save_raw --max-runtime 3300',
+            task_id="run_speed_save_raw",
+            bash_command=f"{PYTHON_CMD} {RUN_TASK_SCRIPT} speed_save_raw",
         )
 
         run_speed_enriched = BashOperator(
-            task_id='run_speed_save_enriched',
-            bash_command=f'{PYTHON_CMD} {RUN_TASK_SCRIPT} speed_save_enriched --max-runtime 3300',
+            task_id="run_speed_save_enriched",
+            bash_command=f"{PYTHON_CMD} {RUN_TASK_SCRIPT} speed_save_enriched",
         )
 
         run_speed_trending_topics = BashOperator(
-            task_id='run_speed_trending_topics',
-            bash_command=f'{PYTHON_CMD} {RUN_TASK_SCRIPT} speed_trending_topics --max-runtime 3300',
+            task_id="run_speed_trending_topics",
+            bash_command=f"{PYTHON_CMD} {RUN_TASK_SCRIPT} speed_trending_topics",
         )
 
         run_speed_trending_words = BashOperator(
-            task_id='run_speed_trending_words',
-            bash_command=f'{PYTHON_CMD} {RUN_TASK_SCRIPT} speed_trending_words --max-runtime 3300',
+            task_id="run_speed_trending_words",
+            bash_command=f"{PYTHON_CMD} {RUN_TASK_SCRIPT} speed_trending_words",
         )
 
     # Dependencies: services and speed run in parallel (no strict dependency for resilience)
