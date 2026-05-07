@@ -175,10 +175,9 @@ class Consumer:
                         self.producer.send(self.output_topic, json.loads(event.model_dump_json()))
                     for event in failed:
                         self.producer.send(self.dlq_topic, json.loads(event.model_dump_json()))
-
-                    self.producer.flush()
+                    
                     logger.info(
-                        f"Batch processed: {len(successful)} success, {len(failed)} failed"
+                        f"Batch processed: {len(successful)} success, {len(failed)} failed (buffered)"
                     )
                     self.batch = []
 
@@ -190,8 +189,7 @@ class Consumer:
                     self.producer.send(self.output_topic, json.loads(event.model_dump_json()))
                 for event in failed:
                     self.producer.send(self.dlq_topic, json.loads(event.model_dump_json()))
-                self.producer.flush()
-                logger.info(f"Final batch: {len(successful)} success, {len(failed)} failed")
+                logger.info(f"Final batch: {len(successful)} success, {len(failed)} failed (buffered)")
                 self.batch = []
 
         except Exception as e:

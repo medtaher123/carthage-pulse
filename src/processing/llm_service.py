@@ -2,6 +2,7 @@
 
 import logging
 import os
+import signal
 from typing import Optional, List
 from openai import OpenAI
 from pydantic import BaseModel
@@ -9,6 +10,16 @@ from src.shared_utils import RedditEvent, Enrichment
 
 logger = logging.getLogger(__name__)
 logging.getLogger("httpx").setLevel(logging.WARNING)
+
+
+class TimeoutError(Exception):
+    """Custom timeout exception"""
+    pass
+
+
+def timeout_handler(signum, frame):
+    """Handle timeout signal"""
+    raise TimeoutError("Enrichment operation exceeded timeout")
 
 
 class BatchEnrichmentResponse(BaseModel):
@@ -176,14 +187,25 @@ class LLMService:
         return f"{event.title or ''}\n\n{event.content or ''}".strip()
 
     def enrich_batch(self, events: List[RedditEvent]) -> List[RedditEvent]:
-        """Enrich a batch of events"""
+        """Enrich a batch of events with timeout protection"""
         if not events:
             return []
+        
         texts = [self._extract_text(event) for event in events]
-
+        
+        # Set 90-second timeout for batch enrichment (leaves buffer for polling)
+        signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(90)
+        
         try:
             results = self.provider.enrich(texts)
+            signal.alarm(0)  # Cancel alarm
+        except TimeoutError:
+            logger.warning(f"Batch enrichment timeout after 90s - returning unenriched events")
+            signal.alarm(0)  # Cancel alarm
+            return events
         except Exception as e:
+            signal.alarm(0)  # Cancel alarm
             logger.warning(f"Provider error: {type(e).__name__}")
             return events
 
@@ -212,14 +234,24 @@ class LLMService:
         return enriched
 
     def enrich(self, event: RedditEvent) -> Optional[RedditEvent]:
-        """Enrich a single event"""
+        """Enrich a single event with timeout protection"""
         text = self._extract_text(event)
         if not text:
             return event.model_copy(update={"enrichment": None})
 
+        # Set 30-second timeout for single event enrichment
+        signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(30)
+        
         try:
             result = self.provider.enrich([text])
+            signal.alarm(0)  # Cancel alarm
+        except TimeoutError:
+            logger.warning(f"Single event enrichment timeout after 30s for {event.event_id}")
+            signal.alarm(0)  # Cancel alarm
+            return event.model_copy(update={"enrichment": None})
         except Exception as e:
+            signal.alarm(0)  # Cancel alarm
             logger.debug(f"Provider error: {type(e).__name__}")
             return None
 
