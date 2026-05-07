@@ -11,7 +11,7 @@ load_dotenv()
 
 def expand_env_vars(value: Any) -> Any:
     """
-    Recursively expand ${VAR_NAME} environment variables in config values.
+    Recursively expand ${VAR_NAME} or ${VAR_NAME:-default} environment variables in config values.
 
     Examples:
         "${OPENROUTER_API_KEY}" → value of OPENROUTER_API_KEY env var
@@ -21,9 +21,10 @@ def expand_env_vars(value: Any) -> Any:
         # Replace ${VAR_NAME} with environment variable value
         def replace_var(match):
             var_name = match.group(1)
-            return os.getenv(var_name, match.group(0))  # Return original if not found
+            default_value = match.group(2) if match.group(2) is not None else match.group(0)
+            return os.getenv(var_name, default_value)
 
-        return re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", replace_var, value)
+        return re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}", replace_var, value)
 
     elif isinstance(value, dict):
         return {k: expand_env_vars(v) for k, v in value.items()}

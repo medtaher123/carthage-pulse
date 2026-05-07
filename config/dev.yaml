@@ -4,7 +4,7 @@ ingestion:
   subreddits:
     - Tunisia
     - Tunisie
-  poll_interval: 30
+  poll_interval: 120
   fetch_limit: 100
   initial_fetch: true
   user_agent: "FadhlounEl7anoun/1.0 (by /u/Familiar-System542)"
@@ -22,10 +22,11 @@ llm:
   provider: openrouter
   model: meta-llama/llama-3.3-70b-instruct
   api_key: ${OPENROUTER_API_KEY} # Reads from .env or environment
-  # Kafka Settings
+
+# Kafka Settings
 kafka:
   bootstrap_servers:
-    - localhost:9092
+    - ${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}
   # Ingestion output topic
   ingestion_topic: reddit-events
   # Processing input/output topics
@@ -39,7 +40,7 @@ kafka:
 
 # MinIO / S3 Storage
 minio:
-  endpoint: localhost:9000
+  endpoint: ${MINIO_ENDPOINT:-localhost:9000}
   access_key: minioadmin
   secret_key: minioadmin
   bucket: reddit-events
@@ -58,8 +59,8 @@ speed:
 
 # POSTGRES (Serving Layer)
 postgres:
-  host: localhost
-  port: 5432
+  host: ${POSTGRES_HOST:-localhost}
+  port: ${POSTGRES_PORT:-5432}
   user: reddit
   password: reddit
   database: reddit

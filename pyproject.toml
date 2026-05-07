@@ -16,6 +16,8 @@ dependencies = [
     "pyspark[connect]==3.5.4",
     "psycopg2-binary>=2.9.12",
     "questionary>=2.0.0",
+    "apache-airflow==2.9.3",
+    "apache-airflow-providers-docker>=3.5.0",
 ]
 
 [build-system]

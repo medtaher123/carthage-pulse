@@ -1,89 +1,88 @@
-"""Main TUI launcher for Carthage Pulse services"""
+"""Main launcher for Carthage Pulse services
+
+⚠️  IMPORTANT: Airflow is now the primary way to run this pipeline!
+
+For production use, please use Airflow:
+  1. Start infrastructure: docker compose up -d
+  2. Access Airflow UI: http://localhost:8088 (admin/admin)
+  3. Trigger DAGs from the Airflow UI
+
+This script is provided for manual testing and development only.
+"""
 
 import sys
 import questionary
 
 
 def run_ingestion():
-    from ingestion.main import main
-
+    from src.ingestion.main import main
     main()
 
 
 def run_processing():
-    from processing.main import main
-
+    from src.processing.main import main
     main()
 
 
 def run_storage():
-    from storage.main import main
-
+    from src.storage.main import main
     main()
 
 
 def run_get_active_streams():
-    from speed.get_active_streams import main
-
+    from src.speed.get_active_streams import main
     main()
 
 
 def run_terminate_all_spark():
-    from speed.terminate_all_spark import main
-
+    from src.speed.terminate_all_spark import main
     main()
 
 
 def run_speed_save_raw():
-    from speed.save_raw import main
-
+    from src.speed.save_raw import main
     main()
 
 
 def run_speed_save_enriched():
-    from speed.save_enriched import main
-
+    from src.speed.save_enriched import main
     main()
 
 
 def run_speed_trending_topics():
-    from speed.trending_topics import main
-
+    from src.speed.trending_topics import main
     main()
 
 
 def run_speed_trending_words():
-    from speed.trending_words import main
-
+    from src.speed.trending_words import main
     main()
 
 
 def run_batch_daily_sentiment():
-    from batch.daily_sentiment import main
-
+    from src.batch.daily_sentiment import main
     main()
 
 
 def run_batch_weekly_topics():
-    from batch.weekly_topics import main
-
+    from src.batch.weekly_topics import main
     main()
-def run_batch_hourly_sentiment():
-    from batch.hourly_sentiment import main
 
+
+def run_batch_hourly_sentiment():
+    from src.batch.hourly_sentiment import main
     main()
 
 
 def run_batch_topic_sentiment():
-    from batch.topic_sentiment import main
-
+    from src.batch.topic_sentiment import main
     main()
 
 
 def run_batch_top_posts():
-    from batch.top_posts import main
-
+    from src.batch.top_posts import main
     main()
+
 
 def run_batch_menu():
     batch_services = [
@@ -122,7 +121,7 @@ def run_batch_menu():
         ).ask()
 
         if choice in (None, "back"):
-            return  # go back to main menu
+            return
 
         print("\nLaunching batch job...\n")
         try:
@@ -168,7 +167,7 @@ def run_speed_menu():
         ).ask()
 
         if choice in (None, "back"):
-            return  # go back to main menu
+            return
 
         print("\nLaunching speed job...\n")
         try:
@@ -182,6 +181,21 @@ def run_speed_menu():
 
 
 def main():
+    print("""
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                    Carthage Pulse - Reddit Analytics Pipeline                  ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+⚠️  AIRFLOW IS NOW THE PRIMARY WAY TO RUN THIS PIPELINE!
+
+For production use:
+  1. Start infrastructure: docker compose up -d
+  2. Access Airflow UI: http://localhost:8088 (admin/admin)
+  3. Trigger DAGs from the Airflow UI
+
+This script is for manual testing and development only.
+""")
+
     services = [
         questionary.Separator(),
         questionary.Choice(
@@ -218,7 +232,7 @@ def main():
 
     while True:
         choice = questionary.select(
-            "Select a service to run:",
+            "Select a service to run (MANUAL MODE):",
             choices=services,
             style=questionary.Style(
                 [

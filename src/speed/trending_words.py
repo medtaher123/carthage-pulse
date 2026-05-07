@@ -3,10 +3,9 @@ from .utils.kafka_utils import SPARK_CONNECT_TARGET, read_from_kafka, RAW_EVENTS
 from .utils.postgres_utils import write_to_postgres
 from .utils.event_json_types import raw_event_json_schema
 from .utils.spark_columns import get_raw_columns
-from .utils.word_count_utils import extract_trending_words # Assuming you saved the transformer here
+from .utils.word_count_utils import extract_trending_words
 
-
-def main():
+def main(max_runtime: int | None = None):
     # 1. Initialize Spark (This connects to the same cluster, but as a new job)
     spark = (
         SparkSession.builder
@@ -36,9 +35,15 @@ def main():
     )
 
     # 5. Await termination
+    timeout_ms = max_runtime * 1000 if max_runtime else None
     try:
         print(f"Trending words pipeline has started.")
-        query.awaitTermination()
+        if timeout_ms:
+            query.awaitTermination(timeout_ms)
+            print("Max runtime reached, cleanly stopping trending words stream.")
+            query.stop()
+        else:
+            query.awaitTermination()
     except KeyboardInterrupt:
         print(f"Stopping trending words pipeline...")
         query.stop()

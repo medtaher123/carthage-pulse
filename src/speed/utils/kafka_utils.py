@@ -50,6 +50,7 @@ def read_from_kafka(spark, topic: str, json_schema, select_columns: List[Column]
         .option("kafka.bootstrap.servers", KAFKA_BROKER)
         .option("subscribe", topic)
         .option("startingOffsets", "earliest")
+        .option("failOnDataLoss", "false")
         .load()
     )
 

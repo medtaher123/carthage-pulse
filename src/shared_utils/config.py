@@ -1,5 +1,6 @@
 """Shared configuration - common config loaders and getters"""
 
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -8,7 +9,9 @@ import yaml
 from src.shared_utils.config_utils import expand_env_vars
 
 
-DEFAULT_CONFIG_PATH = "config/dev.yaml"
+# Calculate absolute path to project root
+ROOT_DIR = Path(__file__).parent.parent.parent
+DEFAULT_CONFIG_PATH = str(ROOT_DIR / "config" / "dev.yaml")
 _cached_config: Optional[dict] = None
 
 
@@ -23,10 +26,13 @@ def load_config(config_path: str = DEFAULT_CONFIG_PATH, use_cache: bool = True) 
     if path.exists():
         with open(path) as f:
             config = yaml.safe_load(f) or {}
+            print(f"DEBUG: Loaded config from {config_path}: {config}")
             config = expand_env_vars(config)
+            print(f"DEBUG: Expanded config: {config}")
             if use_cache:
                 _cached_config = config
             return config
+    print(f"DEBUG: Config file not found at {config_path}")
     return {}
 
 

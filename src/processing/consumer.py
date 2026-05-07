@@ -3,7 +3,8 @@
 import json
 import logging
 import signal
-from typing import List, Tuple
+import time
+from typing import List, Tuple, Optional
 from pydantic import ValidationError
 from kafka import KafkaConsumer, KafkaProducer
 from src.shared_utils.config import (
@@ -29,7 +30,7 @@ logger = logging.getLogger(__name__)
 class Consumer:
     """Kafka consumer that enriches Reddit events with LLM"""
 
-    def __init__(self):
+    def __init__(self, max_runtime: Optional[float] = None):
         self.config = load_config()
         logger.info("Initializing Consumer")
         self.consumer = KafkaConsumer(
@@ -39,7 +40,7 @@ class Consumer:
             value_deserializer=lambda m: json.loads(m.decode("utf-8")),
             auto_offset_reset="earliest",
             enable_auto_commit=True,
-            consumer_timeout_ms=5000,
+            consumer_timeout_ms=-1,
         )
         self.producer = KafkaProducer(
             bootstrap_servers=get_kafka_bootstrap_servers(self.config),
@@ -49,6 +50,7 @@ class Consumer:
         self.dlq_topic = get_kafka_dlq_topic(self.config)
         self.batch_size = get_processing_batch_size(self.config)
         self.max_retries = get_max_retries(self.config)
+        self.max_runtime = max_runtime
 
         self.llm_service = LLMService(
             provider=get_provider(
@@ -65,28 +67,28 @@ class Consumer:
         self.batch: List[RedditEvent] = []
         self.running = True
 
+    #  Signal handling (graceful shutdown)
+    def _on_sigterm(self, signum, frame):
+        logger.info("Received shutdown signal in processing consumer")
+        self.running = False
+
+    #  Business logic
     def _process_event_with_retries(self, event: RedditEvent) -> RedditEvent:
         """Process single event with retry logic"""
         for attempt in range(self.max_retries):
             try:
                 enriched = self.llm_service.enrich(event)
                 if enriched and enriched.enrichment:
-                    logger.debug(
-                        f"🎉 {event.event_id}: enriched (attempt {attempt + 1})"
-                    )
+                    logger.debug(f"🎉 {event.event_id}: enriched (attempt {attempt + 1})")
                     return enriched
                 elif enriched:
-                    logger.debug(
-                        f"⏭️  {event.event_id}: no enrichment (attempt {attempt + 1})"
-                    )
+                    logger.debug(f"⏭️  {event.event_id}: no enrichment (attempt {attempt + 1})")
                     if attempt < self.max_retries - 1:
                         continue
                     return enriched
                 else:
-                    logger.debug(
-                        f"🔄 {event.event_id}: retry {attempt + 1}/{self.max_retries}"
-                    )
-            except Exception as e:
+                    logger.debug(f"🔄 {event.event_id}: retry {attempt + 1}/{self.max_retries}")
+            except Exception:
                 logger.debug(f"⚠️  {event.event_id}: error on attempt {attempt + 1}")
                 if attempt == self.max_retries - 1:
                     break
@@ -99,11 +101,10 @@ class Consumer:
     ) -> Tuple[List[RedditEvent], List[RedditEvent]]:
         """Process batch and split into successful and failed"""
         logger.info(f"Processing batch: {len(batch)} events")
-
         try:
             enriched_batch = self.llm_service.enrich_batch(batch)
-        except Exception as e:
-            logger.warning(f"Batch enrichment failed: {type(e).__name__}, falling back to individual processing")
+        except Exception:
+            logger.warning(f"Batch enrichment failed, falling back to individual processing")
             enriched_batch = []
             for event in batch:
                 enriched = self._process_event_with_retries(event)
@@ -119,36 +120,37 @@ class Consumer:
 
         return successful, failed
 
-    def shutdown(self, signum, frame):
+    def shutdown(self, signum=None, frame=None):
         """Handle shutdown signal"""
-        logger.info("Shutdown signal received")
-        self.running = False
+        if self.running:
+            logger.info("Shutdown signal received")
+            self.running = False
         if self.batch:
             logger.info(f"Processing {len(self.batch)} remaining events")
             successful, failed = self.process_batch(self.batch)
-
             for event in successful:
-                self.producer.send(
-                    self.output_topic, json.loads(event.model_dump_json())
-                )
+                self.producer.send(self.output_topic, json.loads(event.model_dump_json()))
             logger.info(f"Sent {len(successful)} to output")
-
             for event in failed:
                 self.producer.send(self.dlq_topic, json.loads(event.model_dump_json()))
             logger.info(f"Sent {len(failed)} to DLQ")
-
             self.producer.flush()
         self.close()
 
+    #  Main loop (Airflow-aware)
     def run(self):
-        """Main consumer loop"""
-        signal.signal(signal.SIGINT, self.shutdown)
-        signal.signal(signal.SIGTERM, self.shutdown)
+        signal.signal(signal.SIGINT, self._on_sigterm)
+        signal.signal(signal.SIGTERM, self._on_sigterm)
         logger.info(f"Listening on: {get_kafka_processing_input_topic(self.config)}")
 
+        start_time = time.time()
         try:
             for message in self.consumer:
+                # Stop on signal or max_runtime
                 if not self.running:
+                    break
+                if self.max_runtime and (time.time() - start_time) >= self.max_runtime:
+                    logger.info("max_runtime reached, stopping consumer")
                     break
                 if not message.value.get("event_id"):
                     continue
@@ -165,16 +167,10 @@ class Consumer:
 
                 if len(self.batch) >= self.batch_size:
                     successful, failed = self.process_batch(self.batch)
-
                     for event in successful:
-                        self.producer.send(
-                            self.output_topic, json.loads(event.model_dump_json())
-                        )
-
+                        self.producer.send(self.output_topic, json.loads(event.model_dump_json()))
                     for event in failed:
-                        self.producer.send(
-                            self.dlq_topic, json.loads(event.model_dump_json())
-                        )
+                        self.producer.send(self.dlq_topic, json.loads(event.model_dump_json()))
 
                     self.producer.flush()
                     logger.info(
@@ -186,30 +182,25 @@ class Consumer:
             if self.batch and self.running:
                 logger.info(f"Processing final batch of {len(self.batch)} events")
                 successful, failed = self.process_batch(self.batch)
-
                 for event in successful:
-                    self.producer.send(
-                        self.output_topic, json.loads(event.model_dump_json())
-                    )
-
+                    self.producer.send(self.output_topic, json.loads(event.model_dump_json()))
                 for event in failed:
-                    self.producer.send(
-                        self.dlq_topic, json.loads(event.model_dump_json())
-                    )
-
+                    self.producer.send(self.dlq_topic, json.loads(event.model_dump_json()))
                 self.producer.flush()
-                logger.info(
-                    f"Final batch: {len(successful)} success, {len(failed)} failed"
-                )
+                logger.info(f"Final batch: {len(successful)} success, {len(failed)} failed")
                 self.batch = []
+
         except Exception as e:
             logger.exception(f"Unexpected error in consumer loop: {e}")
             raise
 
     def close(self):
         """Close consumer and producer"""
-        logger.info("Closing consumer and producer")
-        self.consumer.close()
-        self.producer.flush()
-        self.producer.close()
-        logger.info("Consumer shutdown complete")
+        try:
+            logger.info("Closing consumer and producer")
+            self.consumer.close()
+            self.producer.flush()
+            self.producer.close()
+            logger.info("Consumer shutdown complete")
+        except Exception:
+            pass

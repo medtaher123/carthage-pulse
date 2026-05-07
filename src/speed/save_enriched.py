@@ -1,12 +1,11 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, to_json
 from .utils.kafka_utils import SPARK_CONNECT_TARGET, read_from_kafka, ENRICHED_EVENTS_KAFKA_TOPIC
 from .utils.postgres_utils import write_to_postgres
 from .utils.event_json_types import enriched_event_json_schema
 from .utils.spark_columns import get_enriched_columns
 
 
-def main():
+def main(max_runtime: int | None = None):
     spark = (
         SparkSession.builder
         .appName(ENRICHED_EVENTS_KAFKA_TOPIC)
@@ -28,10 +27,16 @@ def main():
         db_table="enriched_events"
     )
 
-    # 3. Await termination to keep the script running
+    # 3. Await termination – stop after max_runtime (ms) so Airflow can restart us.
+    timeout_ms = max_runtime * 1000 if max_runtime else None
     try:
         print(f"Streaming pipeline for {ENRICHED_EVENTS_KAFKA_TOPIC} has started.")
-        query.awaitTermination()
+        if timeout_ms:
+            query.awaitTermination(timeout_ms)
+            print("Max runtime reached, cleanly stopping enriched-events stream.")
+            query.stop()
+        else:
+            query.awaitTermination()
     except KeyboardInterrupt:
         print(f"Stopping stream for topic {ENRICHED_EVENTS_KAFKA_TOPIC}...")
         query.stop()
