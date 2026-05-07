@@ -6,7 +6,7 @@ from pyspark.sql import DataFrame
 STOP_WORDS = [
     "the", "and", "this", "that", "with", "from", "for",
     "what", "your", "would", "want", "have", "when", "they", "there", "which", "about", "like", "just", "more",
-    "here", "actually", "https",
+    "here", "actually", "https", "what's", "most", "being", "thing", "were", "ever",
     "eli", "mta3", "ala", "fama", "haka", "bech", "fi", # Derja/Arabic
     "ken", "houwa", "hiyya", "mouch", "bara", "aya"
 ]
