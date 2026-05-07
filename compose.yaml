@@ -228,8 +228,8 @@ services:
 
   airflow-init:
     build:
-      context: ./infra/airflow
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./infra/airflow/Dockerfile
     image: airflow-big-data:latest
     pull_policy: never
     container_name: airflow_init
