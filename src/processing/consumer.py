@@ -41,6 +41,10 @@ class Consumer:
             auto_offset_reset="earliest",
             enable_auto_commit=True,
             consumer_timeout_ms=-1,
+            # Session management: keep consumer group alive even when idle
+            session_timeout_ms=30000,  # 30 seconds before considered dead
+            heartbeat_interval_ms=10000,  # Send heartbeat every 10 seconds
+            max_poll_interval_ms=300000,  # 5 minutes between polls
         )
         self.producer = KafkaProducer(
             bootstrap_servers=get_kafka_bootstrap_servers(self.config),
