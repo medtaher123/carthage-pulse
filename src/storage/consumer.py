@@ -3,8 +3,8 @@
 import json
 import logging
 import signal
-from datetime import datetime
-from typing import List
+import time
+from typing import List, Optional
 from io import BytesIO
 from kafka import KafkaConsumer
 from minio import Minio
@@ -29,9 +29,9 @@ logger = logging.getLogger(__name__)
 
 
 class StorageConsumer:
-    """Kafka consumer that persists enriched events to MinIO"""
+    """Kafka consumer that persists enriched events to MinIO (Airflow-ready)"""
 
-    def __init__(self):
+    def __init__(self, max_runtime: Optional[float] = None):
         self.config = load_config()
         logger.info("Initializing StorageConsumer")
         self.consumer = KafkaConsumer(
@@ -51,6 +51,7 @@ class StorageConsumer:
         )
         self.bucket = get_minio_bucket(self.config)
         self.batch_size = get_storage_batch_size(self.config)
+        self.max_runtime = max_runtime
         self._ensure_bucket()
         logger.info(
             f"StorageConsumer ready - endpoint: {get_minio_endpoint(self.config)}, bucket: {self.bucket}"
@@ -65,34 +66,33 @@ class StorageConsumer:
             self.minio_client.make_bucket(self.bucket)
             logger.info(f"Created bucket: {self.bucket}")
 
-    def _get_partition_path(self, event: RedditEvent) -> str:
-        """Generate partition path based on event timestamp"""
-        dt = event.timestamp
-        return f"year={dt.year}/month={dt.month:02d}/day={dt.day:02d}/{event.event_id}.parquet"
-
-    def _write_event(self, event: RedditEvent) -> bool:
-        """Write single event to MinIO as Parquet"""
+    def _write_batch(self, events: List[RedditEvent]) -> int:
+        """Write batch of events to MinIO as Parquet"""
+        if not events:
+            return 0
         try:
-            key = self._get_partition_path(event)
-            table = pa.Table.from_pylist([self._event_to_dict(event)])
+            first_ts = events[0].timestamp
+            partition_path = (
+                f"batch/year={first_ts.year}/month={first_ts.month:02d}/day={first_ts.day:02d}/"
+                f"{time.time():.0f}.parquet"
+            )
+            records = [self._event_to_dict(e) for e in events]
+            table = pa.Table.from_pylist(records)
             buffer = BytesIO()
-            pq.write_table(table, buffer)
+            pq.write_table(table, buffer, compression="snappy")
             buffer.seek(0)
             self.minio_client.put_object(
-                self.bucket,
-                key,
-                buffer,
-                length=buffer.getbuffer().nbytes,
-                content_type="application/octet-stream",
+                self.bucket, partition_path, buffer,
+                length=buffer.getbuffer().nbytes, content_type="application/octet-stream"
             )
-            logger.debug(f"Stored event {event.event_id} to {key}")
-            return True
+            logger.info(f"Wrote batch of {len(events)} events to {partition_path}")
+            return len(events)
         except S3Error as e:
-            logger.error(f"S3Error writing event {event.event_id}: {e}")
-            return False
+            logger.error(f"S3Error writing batch: {e}")
+            return 0
         except Exception as e:
-            logger.error(f"Error writing event {event.event_id}: {e}")
-            return False
+            logger.error(f"Error writing batch: {e}")
+            return 0
 
     def _event_to_dict(self, event: RedditEvent) -> dict:
         """Convert RedditEvent to dict for Parquet"""
@@ -115,72 +115,39 @@ class StorageConsumer:
         }
         if event.enrichment:
             e = event.enrichment
-            d.update(
-                {
-                    "enrichment_languages": (
-                        [l.value for l in e.languages] if e.languages else []
-                    ),
-                    "enrichment_translation": e.translation,
-                    "enrichment_sentiment": e.sentiment_score,
-                    "enrichment_intent": e.intent,
-                    "enrichment_topics": e.topics or [],
-                    "enrichment_entity_names": (
-                        [ent.name for ent in e.entities] if e.entities else []
-                    ),
-                    "enrichment_entity_types": (
-                        [ent.type for ent in e.entities] if e.entities else []
-                    ),
-                }
-            )
+            d.update({
+                "enrichment_languages": [l.value for l in e.languages] if e.languages else [],
+                "enrichment_translation": e.translation,
+                "enrichment_sentiment": e.sentiment_score,
+                "enrichment_intent": e.intent,
+                "enrichment_topics": e.topics or [],
+                "enrichment_entity_names": [ent.name for ent in e.entities] if e.entities else [],
+                "enrichment_entity_types": [ent.type for ent in e.entities] if e.entities else [],
+            })
         return d
 
-    def _write_batch(self, events: List[RedditEvent]) -> int:
-        """Write batch of events to MinIO as Parquet"""
-        if not events:
-            return 0
-        try:
-            first_ts = events[0].timestamp
-            partition_path = f"batch/year={first_ts.year}/month={first_ts.month:02d}/day={first_ts.day:02d}/{datetime.now().strftime('%H%M%S')}.parquet"
-            records = [self._event_to_dict(e) for e in events]
-            table = pa.Table.from_pylist(records)
-            buffer = BytesIO()
-            pq.write_table(table, buffer, compression="snappy")
-            buffer.seek(0)
-            self.minio_client.put_object(
-                self.bucket,
-                partition_path,
-                buffer,
-                length=buffer.getbuffer().nbytes,
-                content_type="application/octet-stream",
-            )
-            logger.info(f"Wrote batch of {len(events)} events to {partition_path}")
-            return len(events)
-        except S3Error as e:
-            logger.error(f"S3Error writing batch: {e}")
-            return 0
-        except Exception as e:
-            logger.error(f"Error writing batch: {e}")
-            return 0
-
-    def shutdown(self, signum, frame):
-        """Handle shutdown signal"""
-        logger.info("Shutdown signal received")
+    def _on_sigterm(self, signum, frame):
+        logger.info("Received shutdown signal in storage consumer")
         self.running = False
-        if self.batch:
-            logger.info(f"Writing final batch of {len(self.batch)} events")
-            self._write_batch(self.batch)
-        self.close()
 
+    # ------------------------------------------------------------------ #
+    #  Main loop (Airflow-aware)
+    # ------------------------------------------------------------------ #
     def run(self):
-        """Main consumer loop"""
-        signal.signal(signal.SIGINT, self.shutdown)
-        signal.signal(signal.SIGTERM, self.shutdown)
+        signal.signal(signal.SIGINT, self._on_sigterm)
+        signal.signal(signal.SIGTERM, self._on_sigterm)
         logger.info(f"Listening on: {get_kafka_storage_input_topic(self.config)}")
 
+        start_time = time.time()
         try:
             for message in self.consumer:
+                # Stop on signal or max_runtime
                 if not self.running:
                     break
+                if self.max_runtime and (time.time() - start_time) >= self.max_runtime:
+                    logger.info("max_runtime reached, stopping storage consumer")
+                    break
+
                 if not message.value.get("event_id"):
                     continue
 
@@ -202,6 +169,7 @@ class StorageConsumer:
                     logger.info(f"Batch processed: {written} events written")
                     self.batch = []
 
+            # Final flush
             if self.batch and self.running:
                 logger.info(f"Writing final batch of {len(self.batch)} events")
                 written = self._write_batch(self.batch)
@@ -213,8 +181,8 @@ class StorageConsumer:
 
     def close(self):
         """Close consumer"""
-        logger.info("Closing consumer")
         try:
+            logger.info("Closing consumer")
             self.consumer.close()
         except Exception:
             pass

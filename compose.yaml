@@ -206,11 +206,148 @@ services:
       - ./data:/data:rw
       - ./logs:/opt/spark/logs
 
+  # --------------------------------------------------------------------------- #
+  # Airflow Services
+  # --------------------------------------------------------------------------- #
+  airflow-postgres:
+    image: postgres:15
+    container_name: airflow_postgres
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - airflow_postgres_data:/var/lib/postgresql/data
+    networks:
+      - reddit-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  airflow-init:
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
+    container_name: airflow_init
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres:5432/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      AIRFLOW__CORE__PLUGINS_FOLDER: /opt/airflow/plugins
+      PYTHONPATH: /opt/airflow/project
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./airflow/logs:/opt/airflow/logs
+      - ./src:/opt/airflow/project/src
+      - ./config:/opt/airflow/project/config
+      - ./airflow:/opt/airflow/project/airflow
+    networks:
+      - reddit-network
+    command: >
+      bash -c "
+      airflow db migrate &&
+      (airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || true)
+      "
+
+  airflow-webserver:
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
+    container_name: airflow_webserver
+    ports:
+      - "8088:8080"
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    env_file:
+      - .env
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres:5432/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      AIRFLOW__CORE__PLUGINS_FOLDER: /opt/airflow/plugins
+      AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: 32
+      AIRFLOW__CORE__PARALLELISM: 64
+      PYTHONPATH: /opt/airflow/project
+      SPARK_CONNECT_HOST: spark-connect
+      SPARK_CONNECT_PORT: 15002
+      # Docker Compose environment variables for services
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9093
+      MINIO_ENDPOINT: minio:9000
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./airflow/logs:/opt/airflow/logs
+      - ./src:/opt/airflow/project/src
+      - ./config:/opt/airflow/project/config
+      - ./airflow:/opt/airflow/project/airflow
+    networks:
+      - reddit-network
+    command: airflow webserver --port 8080
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  airflow-scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
+    container_name: airflow_scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    env_file:
+      - .env
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres:5432/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      AIRFLOW__CORE__PLUGINS_FOLDER: /opt/airflow/plugins
+      AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: 32
+      AIRFLOW__CORE__PARALLELISM: 64
+      PYTHONPATH: /opt/airflow/project
+      SPARK_CONNECT_HOST: spark-connect
+      SPARK_CONNECT_PORT: 15002
+      # Docker Compose environment variables for services
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9093
+      MINIO_ENDPOINT: minio:9000
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./airflow/logs:/opt/airflow/logs
+      - ./src:/opt/airflow/project/src
+      - ./config:/opt/airflow/project/config
+      - ./airflow:/opt/airflow/project/airflow
+    networks:
+      - reddit-network
+    command: airflow scheduler
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname $(hostname)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
 volumes:
   kafka_data:
   minio_data:
   postgres_data:
   grafana_data:
+  airflow_postgres_data:
 
 networks:
   reddit-network:

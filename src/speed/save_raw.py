@@ -5,7 +5,7 @@ from .utils.event_json_types import raw_event_json_schema
 from .utils.spark_columns import get_raw_columns
 
 
-def main():
+def main(max_runtime: int | None = None):
     spark = (
         SparkSession.builder
         .appName(RAW_EVENTS_KAFKA_TOPIC)
@@ -27,10 +27,16 @@ def main():
         db_table="raw_events"
     )
 
-    # 3. Await termination to keep the script running
+    # 3. Await termination – stop after max_runtime so Airflow can restart us.
+    timeout_ms = max_runtime * 1000 if max_runtime else None
     try:
         print(f"Streaming pipeline for {RAW_EVENTS_KAFKA_TOPIC} has started.")
-        query.awaitTermination()
+        if timeout_ms:
+            query.awaitTermination(timeout_ms)
+            print("Max runtime reached, cleanly stopping raw-events stream.")
+            query.stop()
+        else:
+            query.awaitTermination()
     except KeyboardInterrupt:
         print(f"Stopping stream for topic {RAW_EVENTS_KAFKA_TOPIC}...")
         query.stop()
