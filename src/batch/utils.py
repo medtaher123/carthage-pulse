@@ -17,11 +17,7 @@ from src.speed.utils.kafka_utils import SPARK_CONNECT_TARGET
 def get_spark_batch_session(app_name: str) -> SparkSession:
     config = load_config()
     
-    # We connect natively to spark connect
-    # S3 configurations for MinIO need to be passed to the session
-    # We assume 'minio' resolves to the minio container correctly for the spark-master, 
-    # but could be localhost if run locally. The actual reads happen on the server/executors,
-    # so 'minio:9000' is the right host for the docker network.
+    # S3A configurations for MinIO (S3-compatible storage)
     minio_endpoint = os.getenv("MINIO_INTERNAL_ENDPOINT", "http://minio:9000")
     minio_access = get_minio_access_key(config)
     minio_secret = get_minio_secret_key(config)
@@ -30,6 +26,11 @@ def get_spark_batch_session(app_name: str) -> SparkSession:
         SparkSession.builder
         .appName(app_name)
         .remote(SPARK_CONNECT_TARGET)
+        .config("spark.hadoop.fs.s3a.endpoint", minio_endpoint)
+        .config("spark.hadoop.fs.s3a.access.key", minio_access)
+        .config("spark.hadoop.fs.s3a.secret.key", minio_secret)
+        .config("spark.hadoop.fs.s3a.path.style.access", "true")
+        .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
         .getOrCreate()
     )
     return spark
