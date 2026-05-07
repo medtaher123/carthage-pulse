@@ -21,7 +21,7 @@ RUN pip install --no-cache-dir uv
 # --------------------------------------------------------------------------- #
 # Install Python deps in a virtual environment
 # --------------------------------------------------------------------------- #
-COPY pyproject.toml .
+COPY ../../pyproject.toml .
 RUN uv venv .venv
 RUN . .venv/bin/activate && uv pip install .
 
