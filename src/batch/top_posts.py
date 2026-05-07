@@ -32,6 +32,12 @@ def main():
         print(f"Failed to read parquet data from MinIO: {e}")
         sys.exit(1)
 
+    print(f"Deduplicating events by event_id...")
+    initial_count = df.count()
+    df = df.dropDuplicates(["event_id"])
+    final_count = df.count()
+    print(f"Removed {initial_count - final_count} duplicate events")
+
     print("Computing top posts per subreddit per day...")
     
     # Define window to rank posts by score per day and subreddit
