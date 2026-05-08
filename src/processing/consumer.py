@@ -33,14 +33,17 @@ class Consumer:
     def __init__(self, max_runtime: Optional[float] = None):
         self.config = load_config()
         logger.info("Initializing Consumer")
+        self.group_id = get_kafka_processing_group_id(self.config)
+        self.input_topic = get_kafka_processing_input_topic(self.config)
+        logger.info(f"Consumer group: {self.group_id}, topic: {self.input_topic}")
         self.consumer = KafkaConsumer(
-            get_kafka_processing_input_topic(self.config),
+            self.input_topic,
             bootstrap_servers=get_kafka_bootstrap_servers(self.config),
-            group_id=get_kafka_processing_group_id(self.config),
+            group_id=self.group_id,
             value_deserializer=lambda m: json.loads(m.decode("utf-8")),
             auto_offset_reset="earliest",
-            enable_auto_commit=True,
-            consumer_timeout_ms=-1,
+            enable_auto_commit=False,  # Disable auto-commit for manual control
+            consumer_timeout_ms=-1,  # Wait indefinitely for new messages
             # Session management: keep consumer group alive even when idle
             session_timeout_ms=30000,  # 30 seconds before considered dead
             heartbeat_interval_ms=10000,  # Send heartbeat every 10 seconds
@@ -83,15 +86,21 @@ class Consumer:
             try:
                 enriched = self.llm_service.enrich(event)
                 if enriched and enriched.enrichment:
-                    logger.debug(f"🎉 {event.event_id}: enriched (attempt {attempt + 1})")
+                    logger.debug(
+                        f"🎉 {event.event_id}: enriched (attempt {attempt + 1})"
+                    )
                     return enriched
                 elif enriched:
-                    logger.debug(f"⏭️  {event.event_id}: no enrichment (attempt {attempt + 1})")
+                    logger.debug(
+                        f"⏭️  {event.event_id}: no enrichment (attempt {attempt + 1})"
+                    )
                     if attempt < self.max_retries - 1:
                         continue
                     return enriched
                 else:
-                    logger.debug(f"🔄 {event.event_id}: retry {attempt + 1}/{self.max_retries}")
+                    logger.debug(
+                        f"🔄 {event.event_id}: retry {attempt + 1}/{self.max_retries}"
+                    )
             except Exception:
                 logger.debug(f"⚠️  {event.event_id}: error on attempt {attempt + 1}")
                 if attempt == self.max_retries - 1:
@@ -108,7 +117,9 @@ class Consumer:
         try:
             enriched_batch = self.llm_service.enrich_batch(batch)
         except Exception:
-            logger.warning(f"Batch enrichment failed, falling back to individual processing")
+            logger.warning(
+                f"Batch enrichment failed, falling back to individual processing"
+            )
             enriched_batch = []
             for event in batch:
                 enriched = self._process_event_with_retries(event)
@@ -130,15 +141,26 @@ class Consumer:
             logger.info("Shutdown signal received")
             self.running = False
         if self.batch:
-            logger.info(f"Processing {len(self.batch)} remaining events")
+            logger.info(
+                f"Processing {len(self.batch)} remaining events during shutdown"
+            )
             successful, failed = self.process_batch(self.batch)
             for event in successful:
-                self.producer.send(self.output_topic, json.loads(event.model_dump_json()))
+                self.producer.send(
+                    self.output_topic, json.loads(event.model_dump_json())
+                )
             logger.info(f"Sent {len(successful)} to output")
             for event in failed:
                 self.producer.send(self.dlq_topic, json.loads(event.model_dump_json()))
             logger.info(f"Sent {len(failed)} to DLQ")
             self.producer.flush()
+            try:
+                self.consumer.commit()  # Commit offsets during graceful shutdown
+                logger.info("✓ Offsets committed during shutdown")
+            except Exception as e:
+                logger.error(
+                    f"✗ Failed to commit offsets during shutdown: {e}", exc_info=True
+                )
         self.close()
 
     #  Main loop (Airflow-aware)
@@ -172,13 +194,22 @@ class Consumer:
                 if len(self.batch) >= self.batch_size:
                     successful, failed = self.process_batch(self.batch)
                     for event in successful:
-                        self.producer.send(self.output_topic, json.loads(event.model_dump_json()))
+                        self.producer.send(
+                            self.output_topic, json.loads(event.model_dump_json())
+                        )
                     for event in failed:
-                        self.producer.send(self.dlq_topic, json.loads(event.model_dump_json()))
-                    
-                    logger.info(
-                        f"Batch processed: {len(successful)} success, {len(failed)} failed (buffered)"
-                    )
+                        self.producer.send(
+                            self.dlq_topic, json.loads(event.model_dump_json())
+                        )
+
+                    self.producer.flush()  # Ensure messages are sent before committing
+                    try:
+                        self.consumer.commit()  # Commit offsets after successful processing
+                        logger.info(
+                            f"✓ Batch processed & committed: {len(successful)} success, {len(failed)} failed"
+                        )
+                    except Exception as e:
+                        logger.error(f"✗ Failed to commit offsets: {e}", exc_info=True)
                     self.batch = []
 
             # Process remaining events
@@ -186,10 +217,21 @@ class Consumer:
                 logger.info(f"Processing final batch of {len(self.batch)} events")
                 successful, failed = self.process_batch(self.batch)
                 for event in successful:
-                    self.producer.send(self.output_topic, json.loads(event.model_dump_json()))
+                    self.producer.send(
+                        self.output_topic, json.loads(event.model_dump_json())
+                    )
                 for event in failed:
-                    self.producer.send(self.dlq_topic, json.loads(event.model_dump_json()))
-                logger.info(f"Final batch: {len(successful)} success, {len(failed)} failed (buffered)")
+                    self.producer.send(
+                        self.dlq_topic, json.loads(event.model_dump_json())
+                    )
+                self.producer.flush()  # Ensure messages are sent before committing
+                try:
+                    self.consumer.commit()  # Commit offsets after successful processing
+                    logger.info(
+                        f"✓ Final batch committed: {len(successful)} success, {len(failed)} failed"
+                    )
+                except Exception as e:
+                    logger.error(f"✗ Failed to commit final batch: {e}", exc_info=True)
                 self.batch = []
 
         except Exception as e:
